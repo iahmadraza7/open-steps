@@ -96,8 +96,8 @@ claude plugin details open-steps
 ```
 
 Later, to check the whole install rather than just the plugin, run
-`/os-install-check` in the agent. It reports what is wired and what is not, and
-says "not checked" where it could not look.
+`/open-steps:os-install-check` in the agent. It reports what is wired and what is
+not, and says "not checked" where it could not look.
 
 One thing is worth adding by hand, and no installer can do it for you: a short
 block in your own `~/.claude/CLAUDE.md`. Skills are something the model
