@@ -191,7 +191,7 @@ fi
 
 # --- the routing block ----------------------------------------------------
 routing_block() { # $1 file  $2 area code  $3 what to call the file
-  local f="$1" area="$2" label="$3" missing="" name
+  local f="$1" area="$2" label="$3" missing="" name heading=0
   if [ ! -e "$f" ]; then
     fault "$label is not there, so the routing block is missing." "$area"
     return
@@ -200,24 +200,26 @@ routing_block() { # $1 file  $2 area code  $3 what to call the file
     unknown "$label cannot be read, so the routing block was not checked."
     return
   fi
-  # The heading, not the first skill name. The installer skips its own append
-  # when it finds that name anywhere in the file, so a file that merely talks
-  # about the pack would pass a name search.
-  if ! grep -Fq '## These moments require a skill' "$f"; then
-    fault "$label has no routing block. Its heading is not in the file." "$area"
-    return
-  fi
   if [ "${#expected[@]}" -eq 0 ]; then
-    unknown "$label has the heading. The list of skills in it was not checked."
+    unknown "This script could not read the pack's own list of skills, so $label was not checked."
     return
   fi
+  # The skill names carry the routing, so they decide the fault. Someone who
+  # wrote their own heading over the same table still routes every moment, and
+  # faulting on that would cry wolf on a healthy install. The heading is still
+  # what tells a whole block from a hand written one.
+  grep -Fq '## These moments require a skill' "$f" && heading=1
   for name in "${expected[@]}"; do
     grep -Fq "$name" "$f" || missing="$missing $name"
   done
-  if [ -n "$missing" ]; then
+  if [ -n "$missing" ] && [ "$heading" -eq 0 ]; then
+    fault "$label has no routing block. It does not name these skills:$missing" "$area"
+  elif [ -n "$missing" ]; then
     fault "$label has a routing block, but it is cut short. Missing:$missing" "$area"
-  else
+  elif [ "$heading" -eq 1 ]; then
     ok "$label has the whole routing block. All ${#expected[@]} skills are named in it."
+  else
+    ok "$label names all ${#expected[@]} skills. The pack's own heading is not there, so the wording is your own."
   fi
 }
 
@@ -309,11 +311,33 @@ codex_commands() { # $1 config file -> one "event<tab>path" per line
   ' "$1"
 }
 
+# Presence is decided by the pack's own things, not by the folder existing. A
+# ~/.codex left behind by something else is not an install of this pack, and
+# faulting on it would cry wolf. Half of the pack is a fault, because that
+# silent gap is what this script hunts.
+sdir="$HOME/.agents/skills"
+agents="$HOME/.codex/AGENTS.md"
+cfg="$HOME/.codex/config.toml"
+here=0
+if [ "${#expected[@]}" -gt 0 ]; then
+  for name in "${expected[@]}"; do
+    [ -r "$sdir/$name/SKILL.md" ] && here=1 && break
+  done
+  if [ "$here" -eq 0 ] && [ -r "$agents" ]; then
+    for name in "${expected[@]}"; do
+      grep -Fq "$name" "$agents" && here=1 && break
+    done
+  fi
+fi
+[ "$here" -eq 0 ] && [ -r "$agents" ] \
+  && grep -Fq '## These moments require a skill' "$agents" && here=1
+[ "$here" -eq 0 ] && [ -r "$cfg" ] \
+  && grep -Eq 'session-start\.sh|stop-report\.sh' "$cfg" && here=1
+
 section "Codex"
-if [ ! -d "$HOME/.codex" ]; then
-  fact "Codex is not set up on this computer. There is nothing to check."
+if [ "$here" -eq 0 ]; then
+  fact "Nothing from this pack is set up for Codex. There is nothing to check."
 else
-  sdir="$HOME/.agents/skills"
   if [ ! -d "$sdir" ]; then
     fault "The shared skills folder does not exist, so Codex has no skills from this pack." 1
   elif [ "${#expected[@]}" -eq 0 ]; then
@@ -343,9 +367,8 @@ else
     fi
   fi
 
-  routing_block "$HOME/.codex/AGENTS.md" 2 "Your Codex instructions file"
+  routing_block "$agents" 2 "Your Codex instructions file"
 
-  cfg="$HOME/.codex/config.toml"
   if [ ! -e "$cfg" ]; then
     fault "Codex has no settings file, so its hooks are not set up." 3
   elif [ ! -r "$cfg" ]; then
