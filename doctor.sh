@@ -248,7 +248,7 @@ else
   fi
 
   fact "The hook file gives a path with a placeholder in it. Claude Code fills that in when it runs. This script does not."
-  unknown "Whether Claude Code has connected the hooks to your sessions is not on disk."
+  unknown "Whether Claude Code has connected the hooks to your sessions is not on disk. The sign is that no handover appears at the start of a session."
 fi
 
 # --- Codex ----------------------------------------------------------------
