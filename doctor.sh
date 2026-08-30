@@ -62,6 +62,29 @@ done
 # --- finding the installed copy -------------------------------------------
 # Never the folder this script sits in. A clone is not an installation, and
 # reading the clone would be a check that can only pass.
+json_first_name() { # $1 manifest -> the first name in it
+  grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null \
+    | head -1 | sed -E 's/.*"([^"]*)"$/\1/'
+}
+
+# The marketplace the plugin came from. A marketplace holding one plugin keeps
+# both manifests in the same folder; one holding several keeps its own a level
+# above them. Read rather than assumed, so a fork under another name still
+# builds the right key below.
+market_name() { # $1 plugin folder  $2 plugin manifest -> the name, or nothing
+  local mj name
+  for mj in "$(dirname "$2")/marketplace.json" \
+            "$1/../../.claude-plugin/marketplace.json"; do
+    [ -r "$mj" ] || continue
+    name="$(json_first_name "$mj")"
+    if [ -n "$name" ]; then
+      printf '%s' "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
 install_candidates() {
   local km="$PLUGINS/known_marketplaces.json" loc p
   if [ -r "$km" ]; then
@@ -80,6 +103,8 @@ install_candidates() {
 }
 
 INSTALL=""
+PLUGIN_NAME=""
+MARKET=""
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   grep -Eq '"name"[[:space:]]*:[[:space:]]*"open-steps"' "$f" 2>/dev/null || continue
@@ -88,6 +113,8 @@ while IFS= read -r f; do
   # brings the skills with it.
   [ -n "$root" ] && [ -d "$root/skills" ] || continue
   INSTALL="$root"
+  PLUGIN_NAME="$(json_first_name "$f")"
+  MARKET="$(market_name "$root" "$f")" || MARKET=""
   break
 done < <(install_candidates)
 
@@ -138,12 +165,29 @@ else
     ok "All $good skills are installed and their headers are sound."
   fi
 fi
-# TODO: read the setting that records whether a plugin is switched on, and
-# check it here. On the machine this was written on, neither
-# ~/.claude/settings.json nor ~/.claude.json carried an enabledPlugins key,
-# and guessing a key name would let this script pass an installation that is
-# switched off.
-unknown "Nothing on disk here says whether the plugin is switched on."
+# Switched on is a separate thing from installed. The settings file records it
+# under the plugin's name and its marketplace, joined by an at sign. An
+# installed copy with no entry is installed and not switched on, which is the
+# case that leaves every skill file in place and the agent seeing none of them.
+stf="$HOME/.claude/settings.json"
+if [ -z "$INSTALL" ]; then
+  unknown "There is no installed copy, so whether the plugin is switched on was not checked."
+elif [ ! -e "$stf" ]; then
+  unknown "There is no Claude Code settings file, so whether the plugin is switched on was not checked."
+elif [ ! -r "$stf" ]; then
+  unknown "The Claude Code settings file cannot be read, so whether the plugin is switched on was not checked."
+elif [ -z "$PLUGIN_NAME" ] || [ -z "$MARKET" ]; then
+  unknown "The name the settings file would record was not found, so whether the plugin is switched on was not checked."
+else
+  onkey="$PLUGIN_NAME@$MARKET"
+  if grep -Eq "\"$onkey\"[[:space:]]*:[[:space:]]*true" "$stf"; then
+    ok "The plugin is switched on. The settings file records $onkey as on."
+  elif grep -Eq "\"$onkey\"[[:space:]]*:[[:space:]]*false" "$stf"; then
+    fault "The plugin is installed but switched off. The settings file records $onkey as off." 1
+  else
+    fault "The plugin is installed but never switched on. The settings file has no entry for $onkey." 1
+  fi
+fi
 
 # --- the routing block ----------------------------------------------------
 routing_block() { # $1 file  $2 area code  $3 what to call the file
